@@ -656,6 +656,18 @@ const firebaseConfig = {
 };
 
 let fbApp = null, fbAuth = null, fbDb = null, currentUser = null, cloudReady = false;
+
+/* ============================================================
+   OTOMATİK GİRİŞ — giriş ekranı gösterilmez.
+   Aşağıdaki iki alanı kendi Firebase hesabınla doldur.
+   DİKKAT: bu bilgiler sitenin kaynak kodunda açık durur; adresi
+   bilen herkes tüm öğrenci verilerine erişebilir.
+   Boş bırakırsan normal giriş ekranı geri gelir.
+   ============================================================ */
+const AUTO_LOGIN_EMAIL = "";   // örn: "koray@ornek.com"
+const AUTO_LOGIN_PASS  = "";   // Firebase hesabının şifresi
+let __autoLoginTried = false;
+
 try{
   fbApp = firebase.initializeApp(firebaseConfig);
   fbAuth = firebase.auth();
@@ -1541,8 +1553,18 @@ function sendWhatsApp(){
   const lines = [];
   lines.push(`Merhaba, *${s.name||"öğrenciniz"}* için güncel durum bilgilendirmesi:`);
   lines.push("");
-  lines.push(`Konu ilerlemesi: %${info.pct}`);
-  lines.push("");
+
+  // son toplantı
+  if(info.lastMeeting){
+    const m = info.lastMeeting;
+    const yapildiEtiket = m.yapildi==="Evet" ? "Yapıldı" : m.yapildi==="Ertelendi" ? "Ertelendi" : "Yapılmadı";
+    lines.push("*Son Toplantı*");
+    lines.push(`Tarih: ${turkishDate(m.tarih)} — ${yapildiEtiket}`);
+    if(m.konular) lines.push(`İşlenen Konular: ${m.konular}`);
+    if(m.gozlem) lines.push(`Gözlem: ${m.gozlem}`);
+    if(m.hedef) lines.push(`Sonraki Hedef: ${m.hedef}`);
+    lines.push("");
+  }
 
   // deneme analizi
   if(info.tytAvg!=null || info.aytAvg!=null){
@@ -1558,7 +1580,6 @@ function sendWhatsApp(){
     lines.push("");
   }
 
-  // branş deneme analizi
   if(info.bransOzet.length > 0){
     lines.push("*Branş Deneme Analizi*");
     info.bransOzet.forEach(b=>{
@@ -1568,52 +1589,9 @@ function sendWhatsApp(){
     lines.push("");
   }
 
-  if(info.lastMeeting){
-    const m = info.lastMeeting;
-    const yapildiEtiket = m.yapildi==="Evet" ? "Yapıldı" : m.yapildi==="Ertelendi" ? "Ertelendi" : "Yapılmadı";
-    lines.push("*Son Toplantı*");
-    lines.push(`Tarih: ${turkishDate(m.tarih)} — ${yapildiEtiket}`);
-    if(m.konular) lines.push(`İşlenen Konular: ${m.konular}`);
-    if(m.gozlem) lines.push(`Gözlem: ${m.gozlem}`);
-    if(m.hedef) lines.push(`Sonraki Hedef: ${m.hedef}`);
-    lines.push("");
-  }
-
-  // haftalık ödevlendirme
-  if(info.openHomeworkItems.length>0){
-    lines.push("*Haftalık Ödevlendirme*");
-    info.openHomeworkItems.slice(0,6).forEach(h=>{
-      const durumEtiket = h.durum==="Gecikti" ? " (gecikti)" : h.durum==="Devam Ediyor" ? " (devam ediyor)" : "";
-      lines.push(`• ${h.odev}${durumEtiket}${h.teslim? ` — teslim: ${turkishDate(h.teslim)}`:""}`);
-    });
-    lines.push("");
-  }
-
-  // bu hafta tamamlanan konular (otomatik)
-  const completedGroups = getRecentlyCompletedTopics(id, 7);
-  if(completedGroups.length > 0){
-    lines.push("✅ *Bu Hafta Tamamlanan Konular*");
-    completedGroups.forEach(g=>{
-      lines.push(`${g.ders}:`);
-      g.items.forEach(it=> lines.push(`  • ${it.konu}`));
-    });
-    lines.push("");
-  }
-
-  // hafta ödevlendirmesi (aktif/son hafta)
-  const planAllW = (state.cache[id] && state.cache[id].haftalikPlan) || [];
-  const planWeekW = getActivePlanWeek(id);
-  const plan = planAllW.filter(p=>p.hafta===planWeekW);
-  if(plan.length > 0){
-    lines.push(`*Hafta ${planWeekW} Ödevlendirmesi*`);
-    plan.forEach(p=> lines.push(`• ${p.ders} — ${p.konu}`));
-    lines.push("");
-  }
-
-  if(s.shareToken){
-    lines.push(`Canlı takip linki: ${shareLinkFor(s.shareToken)}`);
-    lines.push("");
-  }
+  // konu tamamlanma yüzdesi
+  lines.push(`Konu ilerlemesi: %${info.pct}`);
+  lines.push("");
 
   lines.push("İyi çalışmalar dileriz.");
   lines.push("Psikolog Koray KÜDEN");
@@ -1842,7 +1820,7 @@ function renderTopbar(){
   </div></div>`;
 }
 function renderTabs(){
-  const items = [["profil","Profil"],["toplantilar","Toplantılar"],["odevler","Ödevler"],["konular","Konu Takip"],["kaynaklar","Kaynaklar"],["denemeler","Deneme Analizi"]];
+  const items = [["profil","Profil"],["toplantilar","Toplantılar"],["konular","Konu Takip"],["kaynaklar","Kaynaklar"],["denemeler","Deneme Analizi"]];
   return `<div class="tabs">${items.map(([id,label])=>
     `<button class="tab-btn ${state.tab===id?'active':''}" data-action="set-tab" data-tab="${id}">${esc(label)}</button>`).join("")}</div>`;
 }
@@ -2895,7 +2873,7 @@ function render(){
     body = renderTabs();
     if(state.tab==="profil") body += renderProfile();
     else if(state.tab==="toplantilar") body += renderMeetings();
-    else if(state.tab==="odevler") body += renderHomework();
+    // ödevler sekmesi kaldırıldı
     else if(state.tab==="konular") body += renderTopics();
     else if(state.tab==="kaynaklar") body += renderKaynaklar();
     else if(state.tab==="denemeler") body += renderExams();
@@ -3456,7 +3434,20 @@ if(__shareToken && fbDb){
     } else {
       currentUser = null;
       cloudReady = false;
-      authMode = "login"; authError=""; authBusy=false;
+      authError = "";
+      // Otomatik giriş: bilgiler doluysa giriş ekranını hiç gösterme.
+      if(AUTO_LOGIN_EMAIL && AUTO_LOGIN_PASS && !__autoLoginTried){
+        __autoLoginTried = true;
+        renderLoadingScreen("Giriş yapılıyor…");
+        try{
+          await fbAuth.signInWithEmailAndPassword(AUTO_LOGIN_EMAIL, AUTO_LOGIN_PASS);
+          return; // başarılı: onAuthStateChanged tekrar tetiklenip yukarıdaki dala girecek
+        }catch(e){
+          console.error("otomatik giriş başarısız", e);
+          authError = "Otomatik giriş başarısız (" + (e && e.code ? e.code : e) + ") — bilgileri elle gir.";
+        }
+      }
+      authMode = "login"; authBusy=false;
       renderAuthScreen();
     }
   });
