@@ -530,22 +530,47 @@ function deleteBransDeneme(bid){
   render();
 }
 
-/* ---------------- sıra tahmini (koçun kendi referans noktalarıyla, interpolasyon) ---------------- */
+/* ---------------- sıra tahmini (koçun kendi referans noktalarıyla, çok noktalı interpolasyon) ---------------- */
+const AYT_ALAN_KEYS = ["SAY","EA","SÖZ","DİL"];
+
+function getSiraRefPoints(key){
+  const raw = state.siraReferans[key];
+  if(!raw) return [];
+  // yeni format: {points: [{net, sira}, ...]}
+  if(raw.points && Array.isArray(raw.points)) return raw.points;
+  // eski format: {net1, deger1, net2, deger2} → dönüştür
+  const pts = [];
+  if(raw.net1 && raw.deger1) pts.push({net: parseFloat(raw.net1), sira: parseFloat(raw.deger1)});
+  if(raw.net2 && raw.deger2) pts.push({net: parseFloat(raw.net2), sira: parseFloat(raw.deger2)});
+  return pts;
+}
 function saveSiraReferans(key, patch){
   const cur = state.siraReferans[key] || {};
   const next = { ...state.siraReferans, [key]: { ...cur, ...patch } };
   state.siraReferans = next;
   lsSet("siraReferans", next);
 }
-function estimateSiralamaBin(refKey, net){
-  const ref = state.siraReferans[refKey];
-  if(!ref) return null;
-  const net1 = parseFloat(ref.net1), net2 = parseFloat(ref.net2);
-  const deger1 = parseFloat(ref.deger1), deger2 = parseFloat(ref.deger2);
-  if([net1,net2,deger1,deger2].some(v=>isNaN(v)) || net1===net2) return null;
-  const slope = (deger2 - deger1) / (net2 - net1);
-  const est = deger1 + (net - net1) * slope;
-  return Math.max(0, est);
+function saveSiraRefPoints(key, points){
+  const next = { ...state.siraReferans, [key]: { points } };
+  state.siraReferans = next;
+  lsSet("siraReferans", next);
+}
+function estimateSiralamaBin(key, net){
+  const pts = getSiraRefPoints(key)
+    .map(p=>({net: parseFloat(p.net), sira: parseFloat(p.sira)}))
+    .filter(p=>!isNaN(p.net) && !isNaN(p.sira))
+    .sort((a,b)=>a.net - b.net);
+  if(pts.length < 2) return null;
+  // piecewise linear — uçlardan dışarı doğru da extrapolasyon yapar
+  for(let i=0; i<pts.length-1; i++){
+    if(net <= pts[i+1].net || i === pts.length-2){
+      const {net:n1,sira:s1} = pts[i];
+      const {net:n2,sira:s2} = pts[i+1];
+      const t = (net - n1) / (n2 - n1);
+      return Math.max(0, s1 + t*(s2-s1));
+    }
+  }
+  return null;
 }
 function formatSiralamaEstimate(bin){
   if(bin==null) return "";
@@ -2476,6 +2501,29 @@ function renderKaynaklar(){
 }
 
 
+function renderSirarefBlock(key){
+  const pts = getSiraRefPoints(key);
+  const allRows = [...pts, {net:"",sira:""}];
+  const rowsHTML = allRows.map((p,i)=>{
+    const netVal  = (p.net  != null && p.net  !== "") ? esc(p.net)  : "";
+    const siraVal = (p.sira != null && p.sira !== "") ? esc(p.sira) : "";
+    const delBtn  = i < pts.length
+      ? `<button class="btn-mini" data-action="delete-siraref" data-siraref-key="${esc(key)}" data-siraref-idx="${i}" style="padding:2px 6px;font-size:11px">×</button>`
+      : "";
+    return `<div class="siraref-row" data-siraref-key="${esc(key)}" data-siraref-idx="${i}">
+      <input type="number" step="any" class="siraref-net" placeholder="Net" value="${netVal}" style="width:68px"/>
+      <span style="font-size:12px;color:#6B7280">≈</span>
+      <input type="number" step="any" class="siraref-sira" placeholder="Bin sıra" value="${siraVal}" style="width:76px"/>
+      <span style="font-size:11px;color:#6B7280">bin</span>
+      ${delBtn}
+    </div>`;
+  }).join("");
+  return `<div class="siraref-block">
+    <div class="siraref-title">${esc(key)}</div>
+    ${rowsHTML}
+  </div>`;
+}
+
 function renderExams(){
   const d = activeData();
   const s = activeStudent();
@@ -2494,9 +2542,12 @@ function renderExams(){
 
   const aytRefKey = aytRefKeyForStudent(s);
   const tytAvgSira = tytExams.length? estimateSiralamaBin("TYT", tytAvg) : null;
-  const aytAvgSira = (aytExams.length && aytRefKey) ? estimateSiralamaBin(aytRefKey, aytAvg) : null;
-  const tytRef = state.siraReferans["TYT"] || {};
-  const aytRef = aytRefKey ? (state.siraReferans[aytRefKey] || {}) : {};
+  // AYT: tüm 4 alan için sıralama hesapla
+  const aytAlanSira = {};
+  if(aytExams.length){
+    AYT_ALAN_KEYS.forEach(k=>{ const v=estimateSiralamaBin(k,aytAvg); if(v!=null) aytAlanSira[k]=v; });
+  }
+  const aytAvgSira = (aytRefKey && aytAlanSira[aytRefKey]!=null) ? aytAlanSira[aytRefKey] : null;
 
   function subjectAverages(exams){
     if(exams.length===0) return [];
@@ -2565,20 +2616,11 @@ function renderExams(){
 
   return `
     <div class="card">
-      <div class="card-head"><div class="card-title">⚙️ Sıralama Tahmini Ayarları</div></div>
+      <div class="card-head"><div class="card-title">⚙️ Sıralama Referans Noktaları</div></div>
       <div class="card-body">
-        <p class="share-desc">Bildiğin gerçek 2 referans noktasını (örn. "35 net ≈ 45 bin sıralama") gir, sistem aradaki/dışındaki netler için orantısal tahmin yapsın. Bir kere ayarlaman yeterli, tüm öğrencilere uygulanır. Bu tahminler senin girdiğin referanslara dayanır, resmi ÖSYM verisi değildir.</p>
-        <div class="siraref-grid">
-          <div class="siraref-block">
-            <div class="siraref-title">TYT</div>
-            <div class="siraref-row"><input type="number" id="tyt-ref-net1" placeholder="Net (örn. 90)" value="${esc(tytRef.net1)}"/><span>net ≈</span><input type="number" id="tyt-ref-deger1" placeholder="Bin sıralama" value="${esc(tytRef.deger1)}"/><span>bin</span></div>
-            <div class="siraref-row"><input type="number" id="tyt-ref-net2" placeholder="Net (örn. 70)" value="${esc(tytRef.net2)}"/><span>net ≈</span><input type="number" id="tyt-ref-deger2" placeholder="Bin sıralama" value="${esc(tytRef.deger2)}"/><span>bin</span></div>
-          </div>
-          ${aytRefKey? `<div class="siraref-block">
-            <div class="siraref-title">AYT (${esc(aytRefKey)})</div>
-            <div class="siraref-row"><input type="number" id="ayt-ref-net1" placeholder="Net" value="${esc(aytRef.net1)}"/><span>net ≈</span><input type="number" id="ayt-ref-deger1" placeholder="Bin sıralama" value="${esc(aytRef.deger1)}"/><span>bin</span></div>
-            <div class="siraref-row"><input type="number" id="ayt-ref-net2" placeholder="Net" value="${esc(aytRef.net2)}"/><span>net ≈</span><input type="number" id="ayt-ref-deger2" placeholder="Bin sıralama" value="${esc(aytRef.deger2)}"/><span>bin</span></div>
-          </div>` : `<div class="empty-msg">AYT tahmini için önce Profil'de öğrencinin alanını seç.</div>`}
+        <p class="share-desc">Her tür için bildiğin net → sıralama (bin) çiftlerini gir. Ne kadar çok nokta girersen tahmin o kadar isabetli olur. Tüm öğrencilere uygulanır.</p>
+        <div style="display:flex;flex-wrap:wrap;gap:16px">
+          ${["TYT", ...AYT_ALAN_KEYS].map(k=>renderSirarefBlock(k)).join("")}
         </div>
       </div>
     </div>
@@ -2600,9 +2642,10 @@ function renderExams(){
             ${lineChartSVG(tytPoints)}
           </div>
           <div>
-            <div class="exam-summary-title">AYT Ortalama Net <strong>${aytAvg.toFixed(2)}</strong> <span class="exam-summary-count">(${aytExams.length} deneme)</span>
-              ${aytAvgSira!=null? `<span class="siralama-badge auto" style="margin-left:6px">≈ ${formatSiralamaEstimate(aytAvgSira)} sıralama (toplu ortalama)</span>`:""}
-            </div>
+            <div class="exam-summary-title">AYT Ortalama Net <strong>${aytAvg.toFixed(2)}</strong> <span class="exam-summary-count">(${aytExams.length} deneme)</span></div>
+            ${aytExams.length && Object.keys(aytAlanSira).length ? `<div style="display:flex;flex-wrap:wrap;gap:5px;margin:4px 0 6px">
+              ${AYT_ALAN_KEYS.filter(k=>aytAlanSira[k]!=null).map(k=>`<span class="siralama-badge auto${aytRefKey===k?' ':" "}">${k}: ≈ ${formatSiralamaEstimate(aytAlanSira[k])}</span>`).join("")}
+            </div>` : ""}
             ${lineChartSVG(aytPoints)}
           </div>
         </div>
@@ -3041,6 +3084,10 @@ function attachEvents(root){
       }
       else if(action==="delete-brans-deneme"){ const bid=el.closest("[data-bid]").dataset.bid; deleteBransDeneme(bid); }
       else if(action==="delete-exam"){ const eid=el.closest("[data-examid]").dataset.examid; deleteExam(eid); }
+      else if(action==="delete-siraref"){
+        const key=el.dataset.sirarefKey; const idx=parseInt(el.dataset.sirarefIdx,10);
+        const pts=getSiraRefPoints(key).slice(); pts.splice(idx,1); saveSiraRefPoints(key,pts); render();
+      }
     };
   });
 
@@ -3052,19 +3099,26 @@ function attachEvents(root){
     coachPhoneEl.oninput = (e)=>{ saveCoachPhone(e.target.value); };
   }
 
-  const sirarefIds = [
-    ["tyt-ref-net1","TYT","net1"], ["tyt-ref-deger1","TYT","deger1"], ["tyt-ref-net2","TYT","net2"], ["tyt-ref-deger2","TYT","deger2"],
-    ["ayt-ref-net1", null, "net1"], ["ayt-ref-deger1", null, "deger1"], ["ayt-ref-net2", null, "net2"], ["ayt-ref-deger2", null, "deger2"],
-  ];
-  sirarefIds.forEach(([elId, fixedKey, field])=>{
-    const el = root.querySelector("#"+elId);
-    if(!el) return;
-    el.onchange = (e)=>{
-      const key = fixedKey || aytRefKeyForStudent(activeStudent());
-      if(!key) return;
-      saveSiraReferans(key, { [field]: e.target.value });
+  // çok noktalı sıralama referansı
+  root.querySelectorAll("[data-siraref-key]").forEach(row=>{
+    const key = row.dataset.sirarefKey;
+    if(!key) return;
+    const netEl  = row.querySelector(".siraref-net");
+    const siraEl = row.querySelector(".siraref-sira");
+    const idx    = parseInt(row.dataset.sirarefIdx, 10);
+    function updateRow(){
+      const pts = getSiraRefPoints(key).slice(); // kopyala
+      const netVal  = netEl  ? netEl.value.trim()  : "";
+      const siraVal = siraEl ? siraEl.value.trim() : "";
+      if(netVal || siraVal){
+        if(idx < pts.length){ pts[idx] = {net: netVal, sira: siraVal}; }
+        else { pts.push({net: netVal, sira: siraVal}); }
+      }
+      saveSiraRefPoints(key, pts.filter(p=>(p.net||"").toString().trim() || (p.sira||"").toString().trim()));
       render();
-    };
+    }
+    if(netEl)  { netEl.onchange  = updateRow; }
+    if(siraEl) { siraEl.onchange = updateRow; }
   });
 
   root.querySelectorAll("[data-odemefield]").forEach(el=>{
