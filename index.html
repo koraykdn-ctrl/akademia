@@ -162,8 +162,18 @@
   .weak-bar-fill{height:100%;border-radius:4px;transition:width .3s;}
   .weak-pct{font-size:11px;font-weight:700;color:#4B5563;width:34px;text-align:right;flex-shrink:0;}
 
-  .exam-card{border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px;}
-  .exam-card-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;}
+  .exam-card{border:1px solid var(--border);border-radius:12px;margin-bottom:10px;overflow:hidden;}
+  .exam-card-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:11px 14px;background:var(--navy);cursor:pointer;user-select:none;}
+  .exam-card-head .exam-name-input{flex:1;min-width:140px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);border-radius:7px;padding:6px 10px;font-size:13px;font-weight:700;color:#fff;}
+  .exam-card-head .exam-name-input::placeholder{color:rgba(255,255,255,.45);}
+  .exam-card-head .exam-date-input{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);border-radius:7px;padding:6px 8px;font-size:12.5px;color:#fff;width:130px;}
+  .exam-card-head .exam-total-net{font-size:13px;font-weight:700;color:#7dd3fc;white-space:nowrap;}
+  .exam-card-head .icon-btn{color:rgba(255,255,255,.6);padding:4px;}
+  .exam-card-head .icon-btn:hover{color:#f87171;}
+  .exam-card-toggle{margin-left:auto;font-size:12px;color:rgba(255,255,255,.6);transition:transform .2s;}
+  .exam-card-toggle.open{transform:rotate(180deg);}
+  .exam-card-body{padding:14px;display:none;}
+  .exam-card-body.open{display:block;}
   .exam-name-input{flex:1;min-width:160px;border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:13px;font-weight:600;}
   .exam-date-input{border:1px solid var(--border);border-radius:8px;padding:7px 8px;font-size:12.5px;}
   .exam-total-net{font-size:12.5px;color:#4B5563;white-space:nowrap;}
@@ -568,15 +578,16 @@ function estimateSiralamaBin(key, net){
       const {net:n1,sira:s1} = pts[i];
       const {net:n2,sira:s2} = pts[i+1];
       const t = (net - n1) / (n2 - n1);
-      return Math.max(0, s1 + t*(s2-s1));
+      return est > 0 ? est : null;
     }
   }
   return null;
 }
 function formatSiralamaEstimate(bin){
-  if(bin==null) return "";
-  if(bin < 1) return `~${Math.round(bin*1000)}`;
-  return `~${bin.toFixed(1)} bin`;
+  if(bin==null || bin<=0) return null;
+  const val = Math.round(bin * 1000);
+  if(val<=0) return null;
+  return "~" + val.toLocaleString("tr-TR");
 }
 function aytRefKeyForStudent(student){
   const alan = student && student.alan;
@@ -908,6 +919,7 @@ function buildInitialState(){
     coachPhone: lsGet("coachPhone", ""),
     activePlanWeek: null, // transient — resets when active student changes
     siraReferans: lsGet("siraReferans", {}),
+    expandedExams: new Set(), // açık deneme kartı id'leri
   };
   if(s.students.length>0){ s.activeId = s.students[0].id; s.openSubjects.add(SUBJECT_ORDER[0]); }
   return s;
@@ -2561,35 +2573,40 @@ function renderExams(){
     const refKey = exam.tur==="TYT" ? "TYT" : aytRefKey;
     const autoSiraBin = refKey ? estimateSiralamaBin(refKey, net) : null;
     const tahmini = manualTahmini!=null ? manualTahmini : (autoSiraBin!=null ? Math.round(autoSiraBin*1000) : null);
+    const siraStr = tahmini ? "~"+tahmini.toLocaleString("tr-TR") : (formatSiralamaEstimate(autoSiraBin) || "");
     let deltaBadge = "";
     if(hedef && tahmini){
-      const diff = hedef - tahmini; // positive = better than target (lower rank than target)
+      const diff = hedef - tahmini;
       deltaBadge = diff >= 0
-        ? `<span class="siralama-badge ok">✓ Hedefin ${Math.abs(diff).toLocaleString('tr-TR')} önünde</span>`
-        : `<span class="siralama-badge bad">Hedeften ${Math.abs(diff).toLocaleString('tr-TR')} geride</span>`;
+        ? `<span class="siralama-badge ok">✓ ~${Math.abs(diff).toLocaleString('tr-TR')} önünde</span>`
+        : `<span class="siralama-badge bad">~${Math.abs(diff).toLocaleString('tr-TR')} geride</span>`;
     }
-    const autoBadge = (manualTahmini==null && autoSiraBin!=null)
-      ? `<span class="siralama-badge auto">${formatSiralamaEstimate(autoSiraBin)} sıralama (hesaplanan)</span>`
-      : (autoSiraBin!=null ? `<span class="siralama-badge auto">hesaplanan: ${formatSiralamaEstimate(autoSiraBin)}</span>` : "");
+    const isOpen = state.expandedExams.has(exam.id);
+    const label = exam.ad || (exam.tarih ? exam.tarih.split("-").reverse().join(".") : exam.tur+" Deneme");
     return `<div class="exam-card" data-examid="${exam.id}">
-      <div class="exam-card-head">
-        <input data-examfield="ad" value="${esc(exam.ad)}" placeholder="Deneme adı (örn. 3D Yayınları TYT-5)" class="exam-name-input"/>
-        <input type="date" data-examfield="tarih" value="${esc(exam.tarih)}" class="exam-date-input"/>
-        <span class="exam-total-net">Toplam Net: <strong>${net.toFixed(2)}</strong></span>
-        <button class="icon-btn" data-action="delete-exam">${svg('trash')}</button>
-      </div>
-      <div class="exam-siralama-row">
-        <label class="exam-siralama-label">Tahmini Sıralama (opsiyonel, elle girersen hesaplananın önüne geçer):
-          <input type="text" inputmode="numeric" data-examfield="tahminiSiralama" value="${esc(exam.tahminiSiralama)}" placeholder="örn. 18.500" class="exam-siralama-input"/>
-        </label>
-        ${autoBadge}
+      <div class="exam-acc-head" data-action="toggle-exam" data-examid="${exam.id}" style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;background:var(--navy);border-radius:${isOpen?'10px 10px 0 0':'10px'};color:#fff;">
+        <span style="font-weight:700;font-size:13.5px;flex:1">${esc(label)}</span>
+        ${exam.tarih && exam.ad ? `<span style="font-size:11.5px;opacity:.7">${exam.tarih.split("-").reverse().join(".")}</span>` : ""}
+        <span style="font-size:12.5px;font-weight:600;background:rgba(255,255,255,.15);padding:2px 8px;border-radius:6px">Net ${net.toFixed(1)}</span>
+        ${siraStr ? `<span style="font-size:11.5px;opacity:.85">${siraStr}</span>` : ""}
         ${deltaBadge}
+        <button class="icon-btn" data-action="delete-exam" style="color:#fff;opacity:.7;margin-left:4px">${svg('trash')}</button>
+        <span style="font-size:14px;opacity:.7">${isOpen?"▲":"▼"}</span>
       </div>
-      <div class="exam-sub-header">
-        <span></span><span>D</span><span>Y</span><span>B</span><span>Net</span>
-
-      </div>
-      ${examSubjectRowsHTML(exam)}
+      ${isOpen ? `<div style="border:1px solid var(--border);border-top:none;border-radius:0 0 10px 10px;padding:12px 14px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+          <input data-examfield="ad" value="${esc(exam.ad)}" placeholder="Deneme adı (örn. 3D Yayınları TYT-5)" class="exam-name-input" style="flex:1;min-width:180px"/>
+          <input type="date" data-examfield="tarih" value="${esc(exam.tarih)}" class="exam-date-input"/>
+        </div>
+        <div class="exam-siralama-row">
+          <label class="exam-siralama-label">Tahmini Sıralama (elle gir veya otomatik hesaplanır):
+            <input type="text" inputmode="numeric" data-examfield="tahminiSiralama" value="${esc(exam.tahminiSiralama)}" placeholder="örn. 18.500" class="exam-siralama-input"/>
+          </label>
+          ${manualTahmini==null && autoSiraBin!=null ? `<span class="siralama-badge auto">${formatSiralamaEstimate(autoSiraBin)||""} (hesaplanan)</span>` : ""}
+        </div>
+        <div class="exam-sub-header"><span></span><span>D</span><span>Y</span><span>B</span><span>Net</span></div>
+        ${examSubjectRowsHTML(exam)}
+      </div>` : ""}
     </div>`;
   }
 
@@ -2625,9 +2642,21 @@ function renderExams(){
       <div class="card-body">
         <div class="grid2">
           <div>
-            <div class="exam-summary-title">TYT Ortalama Net <strong>${tytAvg.toFixed(2)}</strong> <span class="exam-summary-count">(${tytExams.length} deneme)</span>
-              ${tytAvgSira!=null? `<span class="siralama-badge auto" style="margin-left:6px">≈ ${formatSiralamaEstimate(tytAvgSira)} sıralama (toplu ortalama)</span>`:""}
-            </div>
+            <div class="exam-summary-title">TYT Ortalama Net <strong>${tytAvg.toFixed(2)}</strong> <span class="exam-summary-count">(${tytExams.length} deneme)</span></div>
+            ${(()=>{
+              const sira = formatSiralamaEstimate(tytAvgSira);
+              if(!sira) return "";
+              const hedefNum = hedefSiralamaNum;
+              const avgRankNum = tytAvgSira ? Math.round(tytAvgSira*1000) : null;
+              let deltaHTML = "";
+              if(hedefNum && avgRankNum){
+                const diff = hedefNum - avgRankNum;
+                deltaHTML = diff >= 0
+                  ? ` <span class="siralama-badge ok">hedefin ~${Math.abs(diff).toLocaleString("tr-TR")} önünde</span>`
+                  : ` <span class="siralama-badge bad">hedeften ~${Math.abs(diff).toLocaleString("tr-TR")} geride</span>`;
+              }
+              return `<div style="margin:4px 0 6px"><span class="siralama-badge auto">${sira} sıralama (ort.)</span>${deltaHTML}</div>`;
+            })()}
             ${lineChartSVG(tytPoints)}
           </div>
           <div>
@@ -3073,6 +3102,12 @@ function attachEvents(root){
       }
       else if(action==="delete-brans-deneme"){ const bid=el.closest("[data-bid]").dataset.bid; deleteBransDeneme(bid); }
       else if(action==="delete-exam"){ const eid=el.closest("[data-examid]").dataset.examid; deleteExam(eid); }
+      else if(action==="toggle-exam"){
+        const eid = el.dataset.examid || el.closest("[data-examid]").dataset.examid;
+        if(state.expandedExams.has(eid)) state.expandedExams.delete(eid);
+        else state.expandedExams.add(eid);
+        render();
+      }
       else if(action==="delete-siraref"){
         const key=el.dataset.sirarefKey; const idx=parseInt(el.dataset.sirarefIdx,10);
         const pts=getSiraRefPoints(key).slice(); pts.splice(idx,1); saveSiraRefPoints(key,pts); render();
