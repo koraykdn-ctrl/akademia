@@ -26,10 +26,11 @@
     --red:#DC4C4C; --red-bg:#FEF2F2; --red-text:#B91C1C;
   }
   *{box-sizing:border-box;}
-  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--text);}
+  html,body{height:100%;margin:0;}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--text);}
   button{font-family:inherit;cursor:pointer;}
   input,select,textarea{font-family:inherit;}
-  .app{display:flex;height:100vh;overflow:hidden;}
+  .app{display:flex;height:100vh;height:100dvh;overflow:hidden;}
 
   /* ---------- sidebar ---------- */
   .sidebar{width:280px;background:var(--navy);color:#fff;display:flex;flex-direction:column;flex-shrink:0;
@@ -64,7 +65,7 @@
   .empty-students{color:rgba(255,255,255,.35);font-size:12px;text-align:center;padding:20px;}
 
   /* ---------- main ---------- */
-  .main{flex:1;overflow-y:auto;}
+  .main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
   .topbar{position:sticky;top:0;z-index:20;background:rgba(246,247,249,.92);backdrop-filter:blur(6px);border-bottom:1px solid var(--border);}
   .topbar-inner{max-width:920px;margin:0 auto;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:10px;}
   .menu-btn{display:inline-flex;background:none;border:none;padding:6px;margin-right:4px;color:#374151;}
@@ -1578,18 +1579,6 @@ function sendWhatsApp(){
   const lines = [];
   lines.push(`Merhaba, *${s.name||"öğrenciniz"}* için güncel durum bilgilendirmesi:`);
   lines.push("");
-
-  // son toplantı
-  if(info.lastMeeting){
-    const m = info.lastMeeting;
-    const yapildiEtiket = m.yapildi==="Evet" ? "Yapıldı" : m.yapildi==="Ertelendi" ? "Ertelendi" : "Yapılmadı";
-    lines.push("*Son Toplantı*");
-    lines.push(`Tarih: ${turkishDate(m.tarih)} — ${yapildiEtiket}`);
-    if(m.konular) lines.push(`İşlenen Konular: ${m.konular}`);
-    if(m.gozlem) lines.push(`Gözlem: ${m.gozlem}`);
-    if(m.hedef) lines.push(`Sonraki Hedef: ${m.hedef}`);
-    lines.push("");
-  }
 
   // deneme analizi
   if(info.tytAvg!=null || info.aytAvg!=null){
