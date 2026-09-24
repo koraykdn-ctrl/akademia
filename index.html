@@ -578,6 +578,7 @@ function estimateSiralamaBin(key, net){
       const {net:n1,sira:s1} = pts[i];
       const {net:n2,sira:s2} = pts[i+1];
       const t = (net - n1) / (n2 - n1);
+      const est = s1 + t*(s2-s1);
       return est > 0 ? est : null;
     }
   }
